@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,20 +39,30 @@ type Server interface {
 }
 
 func NewProxyServer(nodes ...Server) Server {
-	return &proxyServer{nodes}
+	if len(nodes) == 0 {
+		panic("trying to setup proxy without nodex")
+	}
+	return &proxyServer{atomic.Uint64{}, nodes}
 }
 
 // choose node as coordinator
 type proxyServer struct {
+	index atomic.Uint64
 	nodes []Server
 }
 
 func (s *proxyServer) ProcessWrite(ctx context.Context, key, value string) error {
-	return nil
+	nodeIndex := s.getNodeIndex()
+	return s.nodes[nodeIndex].ProcessWrite(ctx, key, value)
 }
 
 func (s *proxyServer) ProcessRead(ctx context.Context, key string) (string, error) {
-	return "", nil
+	nodeIndex := s.getNodeIndex()
+	return s.nodes[nodeIndex].ProcessRead(ctx, key)
+}
+
+func (s *proxyServer) getNodeIndex() int {
+	return int(s.index.Add(1) % uint64(len(s.nodes)))
 }
 
 // ----------------------------------------------------------------------------
