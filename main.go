@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 )
@@ -15,7 +14,7 @@ type Client interface {
 	Read(ctx context.Context, key string) (value string, err error)
 }
 
-func NewClient(ctx context.Context, proxyServer Server) Client {
+func NewClient(proxyServer Server) Client {
 	return &clientImpl{proxyServer}
 }
 
@@ -24,11 +23,11 @@ type clientImpl struct {
 }
 
 func (c *clientImpl) Write(ctx context.Context, key string, value string) error {
-	return nil
+	return c.proxyServer.ProcessWrite(ctx, key, value)
 }
 
 func (c *clientImpl) Read(ctx context.Context, key string) (string, error) {
-	return "", nil
+	return c.proxyServer.ProcessRead(ctx, key)
 }
 
 // ----------------------------------------------------------------------------
@@ -38,13 +37,13 @@ type Server interface {
 	ProcessRead(ctx context.Context, key string) (value string, err error)
 }
 
-func NewProxyServer(nodes []Coordinator) Server {
+func NewProxyServer(nodes ...Server) Server {
 	return &proxyServer{nodes}
 }
 
 // choose node as coordinator
 type proxyServer struct {
-	nodes []Coordinator
+	nodes []Server
 }
 
 func (s *proxyServer) ProcessWrite(ctx context.Context, key, value string) error {
@@ -57,22 +56,9 @@ func (s *proxyServer) ProcessRead(ctx context.Context, key string) (string, erro
 
 // ----------------------------------------------------------------------------
 
-type Coordinator interface {
-	Client
-	// Server
-	// Write(key string, value string) error
-	// Read(key string) (string, error)
-}
-
-type Replica interface {
-	Server
-	// Write(key string, value string) error
-	// Read(key string) (string, error)
-}
-
 type Node interface {
-	Coordinator
-	Replica
+	Server
+	AddNode(...Node)
 }
 
 func NewNode() Node {
@@ -85,7 +71,12 @@ type StampedValue struct {
 }
 
 type nodeImpl struct {
+	others        []Node
 	stampedValues []StampedValue
+}
+
+func (n *nodeImpl) AddNode(others ...Node) {
+	n.others = append(n.others, others...)
 }
 
 func (n *nodeImpl) Write(ctx context.Context, key string, value string) error {
@@ -147,5 +138,16 @@ func ViaQuorum(
 // ----------------------------------------------------------------------------
 
 func main() {
-	fmt.Println("vim-go")
+	node1 := NewNode()
+	node2 := NewNode()
+	node3 := NewNode()
+	node1.AddNode(node1, node2, node3)
+	node2.AddNode(node1, node2, node3)
+	node3.AddNode(node1, node2, node3)
+
+	proxyServer := NewProxyServer(node1, node2, node3)
+	client := NewClient(proxyServer)
+
+	ctx := context.Background()
+	client.Write(ctx, "key", "value")
 }
