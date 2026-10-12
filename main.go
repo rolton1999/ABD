@@ -10,74 +10,74 @@ import (
 
 // ----------------------------------------------------------------------------
 
-type Client interface {
-	Write(ctx context.Context, key string, value string) error
-	Read(ctx context.Context, key string) (value string, err error)
+type User interface {
+	Write(ctx context.Context, value string) error
+	Read(ctx context.Context) (value string, err error)
 }
 
-func NewClient(proxyServer Server) Client {
-	return &clientImpl{proxyServer}
+func NewUser(proxyServer Register) User {
+	return &userImpl{proxyServer}
 }
 
-type clientImpl struct {
-	proxyServer Server
+type userImpl struct {
+	proxyServer Register
 }
 
-func (c *clientImpl) Write(ctx context.Context, key string, value string) error {
-	return c.proxyServer.ProcessWrite(ctx, key, value)
+func (c *userImpl) Write(ctx context.Context, value string) error {
+	return c.proxyServer.Write(ctx, value)
 }
 
-func (c *clientImpl) Read(ctx context.Context, key string) (string, error) {
-	return c.proxyServer.ProcessRead(ctx, key)
+func (c *userImpl) Read(ctx context.Context) (string, error) {
+	return c.proxyServer.Read(ctx)
 }
 
 // ----------------------------------------------------------------------------
 
-type Server interface {
-	ProcessWrite(ctx context.Context, key string, value string) error
-	ProcessRead(ctx context.Context, key string) (value string, err error)
+type Register interface {
+	Write(ctx context.Context, value string) error
+	Read(ctx context.Context) (value string, err error)
 }
 
-func NewProxyServer(nodes ...Coordinator) Server {
+func NewRegister(nodes ...Coordinator) Register {
 	if len(nodes) == 0 {
 		panic("trying to setup proxy without nodex")
 	}
-	return &proxyServer{atomic.Uint64{}, nodes}
+	return &proxyRegister{atomic.Uint64{}, nodes}
 }
 
 // choose node as coordinator
-type proxyServer struct {
+type proxyRegister struct {
 	index atomic.Uint64
 	nodes []Coordinator
 }
 
-func (s *proxyServer) ProcessWrite(ctx context.Context, key, value string) error {
+func (s *proxyRegister) Write(ctx context.Context, value string) error {
 	nodeIndex := s.getNodeIndex()
-	return s.nodes[nodeIndex].Write(ctx, key, value)
+	return s.nodes[nodeIndex].Write(ctx, value)
 }
 
-func (s *proxyServer) ProcessRead(ctx context.Context, key string) (string, error) {
+func (s *proxyRegister) Read(ctx context.Context) (string, error) {
 	nodeIndex := s.getNodeIndex()
-	return s.nodes[nodeIndex].Read(ctx, key)
+	return s.nodes[nodeIndex].Read(ctx)
 }
 
-func (s *proxyServer) getNodeIndex() int {
+func (s *proxyRegister) getNodeIndex() int {
 	return int(s.index.Add(1) % uint64(len(s.nodes)))
 }
 
 // ----------------------------------------------------------------------------
 
 type Coordinator interface {
-	Write(ctx context.Context, key string, value string) error
-	Read(ctx context.Context, key string) (string, error)
+	Write(ctx context.Context, value string) error
+	Read(ctx context.Context) (string, error)
 }
 
 type Node interface {
 	Coordinator
 	AddNode(...Node)
 
-	read(ctx context.Context, key string) (StampedValue, error)
-	write(ctx context.Context, key string, value StampedValue) error
+	read(ctx context.Context) (StampedValue, error)
+	write(ctx context.Context, value StampedValue) error
 }
 
 func NewNode(index int) Node {
@@ -106,7 +106,7 @@ func (n *nodeImpl) AddNode(others ...Node) {
 	n.others = append(n.others, others...)
 }
 
-func (n *nodeImpl) Write(ctx context.Context, key string, value string) error {
+func (n *nodeImpl) Write(ctx context.Context, value string) error {
 	fmt.Printf("start writing on #%d node\n", n.index)
 
 	timestampMutex := sync.Mutex{}
@@ -115,7 +115,7 @@ func (n *nodeImpl) Write(ctx context.Context, key string, value string) error {
 	var toDos []func(context.Context) bool
 	for _, o := range n.others {
 		toDos = append(toDos, func(ctx context.Context) bool {
-			sv, err := o.read(ctx, key)
+			sv, err := o.read(ctx)
 			if err != nil {
 				return false
 			}
@@ -146,7 +146,7 @@ func (n *nodeImpl) Write(ctx context.Context, key string, value string) error {
 	toDos = nil
 	for _, o := range n.others {
 		toDos = append(toDos, func(ctx context.Context) bool {
-			err := o.write(ctx, key, StampedValue{value, timestamp})
+			err := o.write(ctx, StampedValue{value, timestamp})
 			return err == nil
 		})
 	}
@@ -160,17 +160,66 @@ func (n *nodeImpl) Write(ctx context.Context, key string, value string) error {
 	return nil
 }
 
-func (n *nodeImpl) Read(ctx context.Context, key string) (string, error) {
-	fmt.Printf("attempt to read from #%d node\n", n.index)
-	return "", nil
+func (n *nodeImpl) Read(ctx context.Context) (string, error) {
+	mutext := sync.Mutex{}
+	var sv StampedValue
+
+	var toDos []func(context.Context) bool
+	for _, o := range n.others {
+		toDos = append(toDos, func(ctx context.Context) bool {
+			readSv, err := o.read(ctx)
+			if err != nil {
+				return false
+			}
+
+			mutext.Lock()
+			defer mutext.Unlock()
+			sv = readSv
+
+			return true
+		})
+	}
+
+	majority := (len(n.others) + 1) / 2
+
+	DoViaQuorum(
+		ctx,
+		toDos,
+		majority,
+	)
+
+	toDos = nil
+	for _, o := range n.others {
+		toDos = append(toDos, func(ctx context.Context) bool {
+			err := o.write(ctx, sv)
+			return err == nil
+		})
+	}
+
+	DoViaQuorum(
+		ctx,
+		toDos,
+		majority,
+	)
+
+	return sv.value, nil
 }
 
-func (n *nodeImpl) write(ctx context.Context, key string, sv StampedValue) error {
+func (n *nodeImpl) write(ctx context.Context, sv StampedValue) error {
 	fmt.Printf("attempt to write to #%d node with ts %d\n", n.index, sv.timestamp)
+	n.valuesMutex.Lock()
+	defer n.valuesMutex.Unlock()
+
+	l := len(n.stampedValues)
+
+	if l > 0 && n.stampedValues[l-1].timestamp > sv.timestamp {
+		return fmt.Errorf("keeped timestamp is greater than producing")
+	}
+	n.stampedValues = append(n.stampedValues, sv)
 	return nil
 }
 
-func (n *nodeImpl) read(ctx context.Context, key string) (StampedValue, error) {
+func (n *nodeImpl) read(ctx context.Context) (StampedValue, error) {
 	fmt.Printf("attempt to read from #%d node with\n", n.index)
 	n.valuesMutex.RLock()
 	defer n.valuesMutex.RUnlock()
@@ -202,7 +251,6 @@ func DoViaQuorum(
 	for _, doFunc := range toDos {
 		wg.Go(func() {
 			success := doFunc(ctx)
-			fmt.Println("doFunc ended")
 			select {
 			case <-ctx.Done():
 				return
@@ -235,9 +283,11 @@ func main() {
 	node2.AddNode(node1, node2, node3)
 	node3.AddNode(node1, node2, node3)
 
-	proxyServer := NewProxyServer(node1, node2, node3)
-	client := NewClient(proxyServer)
+	register := NewRegister(node1, node2, node3)
+	user := NewUser(register)
 
 	ctx := context.Background()
-	client.Write(ctx, "key", "value")
+	user.Write(ctx, "value")
+	read, _ := user.Read(ctx)
+	fmt.Println("read: ", read)
 }
