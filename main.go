@@ -78,6 +78,8 @@ type Node interface {
 
 	read(ctx context.Context) (StampedValue, error)
 	write(ctx context.Context, value StampedValue) error
+
+	dumpSeenValues() []int
 }
 
 func NewNode(index int) Node {
@@ -112,50 +114,55 @@ func (n *nodeImpl) Write(ctx context.Context, value int) error {
 	timestampMutex := sync.Mutex{}
 	var timestamp uint64
 
-	var toDos []func(context.Context) bool
+	var reads []func(context.Context) bool
 	for _, o := range n.others {
-		toDos = append(toDos, func(ctx context.Context) bool {
+		reads = append(reads, func(ctx context.Context) bool {
 			sv, err := o.read(ctx)
 			if err != nil {
-				return false
+				panic("cannot do any read")
+				// return false
 			}
 
+			// fmt.Println("read sv timestamp: ", sv.timestamp)
 			timestampMutex.Lock()
 			defer timestampMutex.Unlock()
-			if sv.timestamp > timestamp {
-				timestamp = sv.timestamp
-			}
+			timestamp = max(sv.timestamp, timestamp) + 1
+			// if sv.timestamp > timestamp {
+			// 	timestamp = sv.timestamp + 1
+			// }
 
 			return true
 		})
 	}
 
-	majority := (len(n.others) + 1) / 2
-
-	// fmt.Printf("start reading phase on #%d node\n", n.index)
-	err := DoViaQuorum(
-		ctx,
-		toDos,
-		majority,
-	)
-	if err != nil {
-		return err
-	}
-	// fmt.Printf("success with reading phase on #%d node\n", n.index)
-
-	toDos = nil
+	var writes []func(context.Context) bool
 	for _, o := range n.others {
-		toDos = append(toDos, func(ctx context.Context) bool {
+		writes = append(writes, func(ctx context.Context) bool {
 			err := o.write(ctx, StampedValue{value, timestamp})
 			return err == nil
 		})
 	}
 
-	DoViaQuorum(
-		ctx,
-		toDos,
-		majority,
-	)
+	majority := (len(n.others) + 1) / 2
+
+	for {
+		DoViaQuorum(
+			ctx,
+			reads,
+			majority,
+		)
+
+		fmt.Println(n.index, "gonna try write: ", timestamp, value)
+		err := DoViaQuorum(
+			ctx,
+			writes,
+			majority,
+		)
+		if err == nil {
+			break
+		}
+		fmt.Println("write err: ", err, "gonna retry")
+	}
 
 	return nil
 }
@@ -164,9 +171,9 @@ func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 	mutext := sync.Mutex{}
 	var sv StampedValue
 
-	var toDos []func(context.Context) bool
+	var reads []func(context.Context) bool
 	for _, o := range n.others {
-		toDos = append(toDos, func(ctx context.Context) bool {
+		reads = append(reads, func(ctx context.Context) bool {
 			readSv, err := o.read(ctx)
 			if err != nil {
 				return false
@@ -182,27 +189,34 @@ func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 		})
 	}
 
-	majority := (len(n.others) + 1) / 2
-
-	DoViaQuorum(
-		ctx,
-		toDos,
-		majority,
-	)
-
-	toDos = nil
+	var writes []func(context.Context) bool
 	for _, o := range n.others {
-		toDos = append(toDos, func(ctx context.Context) bool {
+		writes = append(writes, func(ctx context.Context) bool {
 			err := o.write(ctx, sv)
 			return err == nil
 		})
 	}
 
-	DoViaQuorum(
-		ctx,
-		toDos,
-		majority,
-	)
+	majority := (len(n.others) + 1) / 2
+
+	for {
+		DoViaQuorum(
+			ctx,
+			reads,
+			majority,
+		)
+
+		fmt.Println(n.index, "read, goonna help write: ", sv)
+		err := DoViaQuorum(
+			ctx,
+			writes,
+			majority,
+		)
+		if err == nil {
+			break
+		}
+		fmt.Println("read err: ", err, "gonna retry")
+	}
 
 	return sv.value, nil
 }
@@ -214,9 +228,23 @@ func (n *nodeImpl) write(ctx context.Context, sv StampedValue) error {
 
 	l := len(n.stampedValues)
 
-	if l > 0 && n.stampedValues[l-1].timestamp > sv.timestamp {
-		return fmt.Errorf("keeped timestamp is greater than producing")
+	if l > 0 {
+		last := n.stampedValues[l-1]
+		if last.timestamp > sv.timestamp {
+			// fmt.Println("keeped timestamp is greater than producing", last.timestamp, sv.timestamp)
+			return fmt.Errorf("keeped timestamp is greater than producing")
+		} else if last.timestamp == sv.timestamp {
+			if last.value != sv.value {
+				// fmt.Println("keeped timestamp is equal but value differs", last.timestamp, sv.timestamp)
+				return fmt.Errorf("keeped timestamp is equal but value differs")
+			}
+		} else if last.value == sv.value {
+			// fmt.Println("values equal, update timestamp", last.timestamp, sv.timestamp)
+			n.stampedValues[l-1].timestamp = sv.timestamp
+			return nil
+		}
 	}
+
 	n.stampedValues = append(n.stampedValues, sv)
 	return nil
 }
@@ -232,6 +260,14 @@ func (n *nodeImpl) read(ctx context.Context) (StampedValue, error) {
 	return n.stampedValues[len(n.stampedValues)-1], nil
 }
 
+func (n *nodeImpl) dumpSeenValues() []int {
+	var ans []int
+	for _, v := range n.stampedValues {
+		ans = append(ans, v.value)
+	}
+	return ans
+}
+
 func DoViaQuorum(
 	ctx context.Context,
 	toDos []func(ctx context.Context) bool,
@@ -242,7 +278,7 @@ func DoViaQuorum(
 	}
 	// TODO(make chan unbuffered)
 	results := make(chan bool, len(toDos))
-	defer close(results)
+	// defer close(results)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -261,15 +297,22 @@ func DoViaQuorum(
 		})
 	}
 
-	for majority > 0 {
+	failed := len(toDos)
+	for majority > 0 && failed != 0 {
+		// fmt.Println("maj, f: ", majority, failed)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case r := <-results:
 			if r {
 				majority -= 1
+			} else {
+				failed -= 1
 			}
 		}
+	}
+	if failed == 0 || majority > 0 {
+		return fmt.Errorf("failed on quorum")
 	}
 
 	return nil
@@ -311,46 +354,62 @@ func main() {
 
 	ctx := context.Background()
 
+	const shouldBeWritten = 100
+
 	value := atomic.Int32{}
+
 	wgProducers := sync.WaitGroup{}
 	startProduce := make(chan struct{})
-	for _, p := range producers {
+
+	for i, p := range producers {
 		wgProducers.Go(func() {
 			<-startProduce
 			for {
 				next := value.Add(1)
-				if next > 100 {
-					return
+				if next > shouldBeWritten {
+					break
 				}
 				e := p.Write(ctx, int(next))
-				fmt.Println("written: ", next)
-				_ = e
+				if e != nil {
+					panic("cannot write")
+				}
 			}
+			fmt.Println(i, "writing done!")
 		})
 	}
 
 	wgConsumers := sync.WaitGroup{}
 	startConsume := make(chan struct{})
+	stopConsume := atomic.Bool{}
 	readValues := [3][]int{}
 	for i, c := range consumers {
-		wgProducers.Go(func() {
+		wgConsumers.Go(func() {
 			<-startConsume
 			for {
 				v, e := c.Read(ctx)
-				//fmt.Println(v, e)
 				_ = e
+				//fmt.Println(v, e)
 				readValues[i] = append(readValues[i], v)
-				fmt.Println("read: ", v)
-				if v == 100 {
-					return
+				if stopConsume.Load() {
+					break
 				}
 			}
 		})
 	}
+
 	close(startConsume)
 	close(startProduce)
+
 	wgProducers.Wait()
+	stopConsume.Store(true)
 	wgConsumers.Wait()
+
+	fmt.Println("from nodes:")
+	for i := range nodes {
+		fmt.Println(nodes[i].dumpSeenValues())
+	}
+
+	fmt.Println("readers seen:")
 	for i, vv := range readValues {
 		fmt.Println(readValues[i])
 		good := true
