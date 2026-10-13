@@ -120,16 +120,11 @@ func (n *nodeImpl) Write(ctx context.Context, value int) error {
 			sv, err := o.read(ctx)
 			if err != nil {
 				panic("cannot do any read")
-				// return false
 			}
 
-			// fmt.Println("read sv timestamp: ", sv.timestamp)
 			timestampMutex.Lock()
-			timestamp = max(sv.timestamp, timestamp) + 1
+			timestamp = max(sv.timestamp, timestamp)
 			timestampMutex.Unlock()
-			// if sv.timestamp > timestamp {
-			// 	timestamp = sv.timestamp + 1
-			// }
 
 			return true
 		})
@@ -152,7 +147,8 @@ func (n *nodeImpl) Write(ctx context.Context, value int) error {
 			majority,
 		)
 
-		fmt.Println(n.index, "gonna try write: ", timestamp, value)
+		timestamp += 1
+
 		err := DoViaQuorum(
 			ctx,
 			writes,
@@ -163,7 +159,7 @@ func (n *nodeImpl) Write(ctx context.Context, value int) error {
 		}
 		fmt.Println("write err: ", err, "gonna retry")
 	}
-
+	fmt.Println("written: ", value)
 	return nil
 }
 
@@ -206,7 +202,6 @@ func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 			majority,
 		)
 
-		fmt.Println(n.index, "read, goonna help write: ", sv)
 		err := DoViaQuorum(
 			ctx,
 			writes,
@@ -222,7 +217,6 @@ func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 }
 
 func (n *nodeImpl) write(ctx context.Context, sv StampedValue) error {
-	// fmt.Printf("attempt to write to #%d node with ts %d\n", n.index, sv.timestamp)
 	n.valuesMutex.Lock()
 	defer n.valuesMutex.Unlock()
 
@@ -231,15 +225,13 @@ func (n *nodeImpl) write(ctx context.Context, sv StampedValue) error {
 	if l > 0 {
 		last := n.stampedValues[l-1]
 		if last.timestamp > sv.timestamp {
-			// fmt.Println("keeped timestamp is greater than producing", last.timestamp, sv.timestamp)
 			return fmt.Errorf("keeped timestamp is greater than producing")
 		} else if last.timestamp == sv.timestamp {
 			if last.value != sv.value {
-				// fmt.Println("keeped timestamp is equal but value differs", last.timestamp, sv.timestamp)
 				return fmt.Errorf("keeped timestamp is equal but value differs")
 			}
+			return nil
 		} else if last.value == sv.value {
-			// fmt.Println("values equal, update timestamp", last.timestamp, sv.timestamp)
 			n.stampedValues[l-1].timestamp = sv.timestamp
 			return nil
 		}
@@ -261,6 +253,7 @@ func (n *nodeImpl) read(ctx context.Context) (StampedValue, error) {
 }
 
 func (n *nodeImpl) dumpSeenValues() []int {
+	fmt.Println(n.stampedValues)
 	var ans []int
 	for _, v := range n.stampedValues {
 		ans = append(ans, v.value)
@@ -281,7 +274,7 @@ func DoViaQuorum(
 	// defer close(results)
 
 	wg := sync.WaitGroup{}
-	// defer wg.Wait()
+	defer wg.Wait()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -291,14 +284,16 @@ func DoViaQuorum(
 			success := doFunc(ctx)
 			select {
 			case <-ctx.Done():
+				// fmt.Println("gone by conext done")
 				return
 			case results <- success:
 			}
+			// fmt.Println("sucess written")
 		})
 	}
 
-	notFailed := len(toDos)
-	for majority > 0 && notFailed != 0 {
+	failed := 0
+	for majority > 0 && failed+majority != len(toDos) {
 		// fmt.Println("maj, f: ", majority, failed)
 		select {
 		case <-ctx.Done():
@@ -307,11 +302,11 @@ func DoViaQuorum(
 			if r {
 				majority -= 1
 			} else {
-				notFailed -= 1
+				failed += 1
 			}
 		}
 	}
-	if notFailed == 0 || majority > 0 {
+	if failed == len(toDos) || majority > 0 {
 		return fmt.Errorf("failed on quorum")
 	}
 
@@ -350,7 +345,6 @@ func main() {
 	nodes := createNodes()
 
 	producers := createUsers(nodes...)
-	consumers := createUsers(nodes...)
 
 	ctx := context.Background()
 
@@ -378,6 +372,7 @@ func main() {
 		})
 	}
 
+	consumers := createUsers(nodes...)
 	wgConsumers := sync.WaitGroup{}
 	startConsume := make(chan struct{})
 	stopConsume := atomic.Bool{}
