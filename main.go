@@ -125,8 +125,8 @@ func (n *nodeImpl) Write(ctx context.Context, value int) error {
 
 			// fmt.Println("read sv timestamp: ", sv.timestamp)
 			timestampMutex.Lock()
-			defer timestampMutex.Unlock()
 			timestamp = max(sv.timestamp, timestamp) + 1
+			timestampMutex.Unlock()
 			// if sv.timestamp > timestamp {
 			// 	timestamp = sv.timestamp + 1
 			// }
@@ -180,10 +180,10 @@ func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 			}
 
 			mutext.Lock()
-			defer mutext.Unlock()
 			if readSv.timestamp >= sv.timestamp {
 				sv = readSv
 			}
+			mutext.Unlock()
 
 			return true
 		})
@@ -280,11 +280,11 @@ func DoViaQuorum(
 	results := make(chan bool, len(toDos))
 	// defer close(results)
 
+	wg := sync.WaitGroup{}
+	// defer wg.Wait()
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	wg := sync.WaitGroup{}
-	defer wg.Wait()
 
 	for _, doFunc := range toDos {
 		wg.Go(func() {
@@ -297,8 +297,8 @@ func DoViaQuorum(
 		})
 	}
 
-	failed := len(toDos)
-	for majority > 0 && failed != 0 {
+	notFailed := len(toDos)
+	for majority > 0 && notFailed != 0 {
 		// fmt.Println("maj, f: ", majority, failed)
 		select {
 		case <-ctx.Done():
@@ -307,11 +307,11 @@ func DoViaQuorum(
 			if r {
 				majority -= 1
 			} else {
-				failed -= 1
+				notFailed -= 1
 			}
 		}
 	}
-	if failed == 0 || majority > 0 {
+	if notFailed == 0 || majority > 0 {
 		return fmt.Errorf("failed on quorum")
 	}
 
