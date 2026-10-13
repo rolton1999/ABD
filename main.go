@@ -11,8 +11,8 @@ import (
 // ----------------------------------------------------------------------------
 
 type User interface {
-	Write(ctx context.Context, value string) error
-	Read(ctx context.Context) (value string, err error)
+	Write(ctx context.Context, value int) error
+	Read(ctx context.Context) (value int, err error)
 }
 
 func NewUser(proxyServer Register) User {
@@ -23,22 +23,22 @@ type userImpl struct {
 	proxyServer Register
 }
 
-func (c *userImpl) Write(ctx context.Context, value string) error {
+func (c *userImpl) Write(ctx context.Context, value int) error {
 	return c.proxyServer.Write(ctx, value)
 }
 
-func (c *userImpl) Read(ctx context.Context) (string, error) {
+func (c *userImpl) Read(ctx context.Context) (int, error) {
 	return c.proxyServer.Read(ctx)
 }
 
 // ----------------------------------------------------------------------------
 
 type Register interface {
-	Write(ctx context.Context, value string) error
-	Read(ctx context.Context) (value string, err error)
+	Write(ctx context.Context, value int) error
+	Read(ctx context.Context) (value int, err error)
 }
 
-func NewRegister(nodes ...Coordinator) Register {
+func NewRegister(nodes ...Node) Register {
 	if len(nodes) == 0 {
 		panic("trying to setup proxy without nodex")
 	}
@@ -48,15 +48,15 @@ func NewRegister(nodes ...Coordinator) Register {
 // choose node as coordinator
 type proxyRegister struct {
 	index atomic.Uint64
-	nodes []Coordinator
+	nodes []Node
 }
 
-func (s *proxyRegister) Write(ctx context.Context, value string) error {
+func (s *proxyRegister) Write(ctx context.Context, value int) error {
 	nodeIndex := s.getNodeIndex()
 	return s.nodes[nodeIndex].Write(ctx, value)
 }
 
-func (s *proxyRegister) Read(ctx context.Context) (string, error) {
+func (s *proxyRegister) Read(ctx context.Context) (int, error) {
 	nodeIndex := s.getNodeIndex()
 	return s.nodes[nodeIndex].Read(ctx)
 }
@@ -68,13 +68,13 @@ func (s *proxyRegister) getNodeIndex() int {
 // ----------------------------------------------------------------------------
 
 type Coordinator interface {
-	Write(ctx context.Context, value string) error
-	Read(ctx context.Context) (string, error)
+	Write(ctx context.Context, value int) error
+	Read(ctx context.Context) (int, error)
 }
 
 type Node interface {
 	Coordinator
-	AddNode(...Node)
+	AddReplica(...Node)
 
 	read(ctx context.Context) (StampedValue, error)
 	write(ctx context.Context, value StampedValue) error
@@ -90,7 +90,7 @@ func NewNode(index int) Node {
 }
 
 type StampedValue struct {
-	value     string
+	value     int
 	timestamp uint64
 }
 
@@ -102,12 +102,12 @@ type nodeImpl struct {
 	stampedValues []StampedValue
 }
 
-func (n *nodeImpl) AddNode(others ...Node) {
+func (n *nodeImpl) AddReplica(others ...Node) {
 	n.others = append(n.others, others...)
 }
 
-func (n *nodeImpl) Write(ctx context.Context, value string) error {
-	fmt.Printf("start writing on #%d node\n", n.index)
+func (n *nodeImpl) Write(ctx context.Context, value int) error {
+	// fmt.Printf("start writing on #%d node\n", n.index)
 
 	timestampMutex := sync.Mutex{}
 	var timestamp uint64
@@ -132,7 +132,7 @@ func (n *nodeImpl) Write(ctx context.Context, value string) error {
 
 	majority := (len(n.others) + 1) / 2
 
-	fmt.Printf("start reading phase on #%d node\n", n.index)
+	// fmt.Printf("start reading phase on #%d node\n", n.index)
 	err := DoViaQuorum(
 		ctx,
 		toDos,
@@ -141,7 +141,7 @@ func (n *nodeImpl) Write(ctx context.Context, value string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("success with reading phase on #%d node\n", n.index)
+	// fmt.Printf("success with reading phase on #%d node\n", n.index)
 
 	toDos = nil
 	for _, o := range n.others {
@@ -160,7 +160,7 @@ func (n *nodeImpl) Write(ctx context.Context, value string) error {
 	return nil
 }
 
-func (n *nodeImpl) Read(ctx context.Context) (string, error) {
+func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 	mutext := sync.Mutex{}
 	var sv StampedValue
 
@@ -174,7 +174,9 @@ func (n *nodeImpl) Read(ctx context.Context) (string, error) {
 
 			mutext.Lock()
 			defer mutext.Unlock()
-			sv = readSv
+			if readSv.timestamp >= sv.timestamp {
+				sv = readSv
+			}
 
 			return true
 		})
@@ -206,7 +208,7 @@ func (n *nodeImpl) Read(ctx context.Context) (string, error) {
 }
 
 func (n *nodeImpl) write(ctx context.Context, sv StampedValue) error {
-	fmt.Printf("attempt to write to #%d node with ts %d\n", n.index, sv.timestamp)
+	// fmt.Printf("attempt to write to #%d node with ts %d\n", n.index, sv.timestamp)
 	n.valuesMutex.Lock()
 	defer n.valuesMutex.Unlock()
 
@@ -220,7 +222,7 @@ func (n *nodeImpl) write(ctx context.Context, sv StampedValue) error {
 }
 
 func (n *nodeImpl) read(ctx context.Context) (StampedValue, error) {
-	fmt.Printf("attempt to read from #%d node with\n", n.index)
+	// fmt.Printf("attempt to read from #%d node with\n", n.index)
 	n.valuesMutex.RLock()
 	defer n.valuesMutex.RUnlock()
 
@@ -275,19 +277,91 @@ func DoViaQuorum(
 
 // ----------------------------------------------------------------------------
 
-func main() {
+func createNodes() []Node {
 	node1 := NewNode(0)
 	node2 := NewNode(1)
 	node3 := NewNode(2)
-	node1.AddNode(node1, node2, node3)
-	node2.AddNode(node1, node2, node3)
-	node3.AddNode(node1, node2, node3)
+	node1.AddReplica(node1, node2, node3)
+	node2.AddReplica(node1, node2, node3)
+	node3.AddReplica(node1, node2, node3)
 
-	register := NewRegister(node1, node2, node3)
-	user := NewUser(register)
+	return []Node{node1, node2, node3}
+}
+
+func createUsers(nodes ...Node) []User {
+	return []User{
+		getUser(nodes...),
+		getUser(nodes...),
+		getUser(nodes...),
+	}
+}
+
+func getUser(nodes ...Node) User {
+	register := NewRegister(nodes...)
+	return NewUser(register)
+}
+
+// ----------------------------------------------------------------------------
+
+func main() {
+	nodes := createNodes()
+
+	producers := createUsers(nodes...)
+	consumers := createUsers(nodes...)
 
 	ctx := context.Background()
-	user.Write(ctx, "value")
-	read, _ := user.Read(ctx)
-	fmt.Println("read: ", read)
+
+	value := atomic.Int32{}
+	wgProducers := sync.WaitGroup{}
+	startProduce := make(chan struct{})
+	for _, p := range producers {
+		wgProducers.Go(func() {
+			<-startProduce
+			for {
+				next := value.Add(1)
+				if next > 100 {
+					return
+				}
+				e := p.Write(ctx, int(next))
+				fmt.Println("written: ", next)
+				_ = e
+			}
+		})
+	}
+
+	wgConsumers := sync.WaitGroup{}
+	startConsume := make(chan struct{})
+	readValues := [3][]int{}
+	for i, c := range consumers {
+		wgProducers.Go(func() {
+			<-startConsume
+			for {
+				v, e := c.Read(ctx)
+				//fmt.Println(v, e)
+				_ = e
+				readValues[i] = append(readValues[i], v)
+				fmt.Println("read: ", v)
+				if v == 100 {
+					return
+				}
+			}
+		})
+	}
+	close(startConsume)
+	close(startProduce)
+	wgProducers.Wait()
+	wgConsumers.Wait()
+	for i, vv := range readValues {
+		fmt.Println(readValues[i])
+		good := true
+		for j := 1; j < len(vv); j++ {
+			if vv[j-1] > vv[j] {
+				good = false
+				break
+			}
+		}
+		if !good {
+			fmt.Println("broken for ", i)
+		}
+	}
 }
