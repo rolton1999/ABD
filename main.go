@@ -199,27 +199,28 @@ func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 
 	majority := (len(n.others) + 1) / 2
 
-	for {
+	// for {
+	DoViaQuorum(
+		ctx,
+		reads,
+		majority,
+	)
+
+	// help
+	if tsCount != majority {
 		DoViaQuorum(
-			ctx,
-			reads,
-			majority,
-		)
-
-		if tsCount == majority {
-			break
-		}
-
-		err := DoViaQuorum(
 			ctx,
 			writes,
 			majority,
 		)
-		if err == nil {
-			break
-		}
-		// fmt.Println("read err: ", err, "gonna retry")
 	}
+
+	// help
+	///		if err == nil {
+	///			break
+	///		}
+	///		// fmt.Println("read err: ", err, "gonna retry")
+	///	}
 
 	return sv.value, nil
 }
