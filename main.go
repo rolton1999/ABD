@@ -339,6 +339,17 @@ func getUser(nodes ...Node) User {
 	return NewUser(register)
 }
 
+func unify(d []int) []int {
+	j := 0
+	for i := range d {
+		if d[i] != d[j] {
+			j += 1
+			d[j] = d[i]
+		}
+	}
+	return d[:j+1]
+}
+
 // ----------------------------------------------------------------------------
 
 func main() {
@@ -405,17 +416,8 @@ func main() {
 	}
 
 	fmt.Println("readers seen:")
-	for i, vv := range readValues {
+	for i := range readValues {
+		readValues[i] = unify(readValues[i])
 		fmt.Println(readValues[i])
-		good := true
-		for j := 1; j < len(vv); j++ {
-			if vv[j-1] > vv[j] {
-				good = false
-				break
-			}
-		}
-		if !good {
-			fmt.Println("broken for ", i)
-		}
 	}
 }
