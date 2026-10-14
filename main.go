@@ -157,15 +157,16 @@ func (n *nodeImpl) Write(ctx context.Context, value int) error {
 		if err == nil {
 			break
 		}
-		fmt.Println("write err: ", err, "gonna retry")
+		// fmt.Println("write err: ", err, "gonna retry")
 	}
-	fmt.Println("written: ", value)
+	// fmt.Println("written: ", value)
 	return nil
 }
 
 func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 	mutext := sync.Mutex{}
 	var sv StampedValue
+	var tsCount int
 
 	var reads []func(context.Context) bool
 	for _, o := range n.others {
@@ -178,6 +179,9 @@ func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 			mutext.Lock()
 			if readSv.timestamp >= sv.timestamp {
 				sv = readSv
+			}
+			if readSv.timestamp == sv.timestamp {
+				tsCount += 1
 			}
 			mutext.Unlock()
 
@@ -202,6 +206,10 @@ func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 			majority,
 		)
 
+		if tsCount == majority {
+			break
+		}
+
 		err := DoViaQuorum(
 			ctx,
 			writes,
@@ -210,7 +218,7 @@ func (n *nodeImpl) Read(ctx context.Context) (int, error) {
 		if err == nil {
 			break
 		}
-		fmt.Println("read err: ", err, "gonna retry")
+		// fmt.Println("read err: ", err, "gonna retry")
 	}
 
 	return sv.value, nil
@@ -253,7 +261,7 @@ func (n *nodeImpl) read(ctx context.Context) (StampedValue, error) {
 }
 
 func (n *nodeImpl) dumpSeenValues() []int {
-	fmt.Println(n.stampedValues)
+	// fmt.Println(n.stampedValues)
 	var ans []int
 	for _, v := range n.stampedValues {
 		ans = append(ans, v.value)
@@ -419,5 +427,16 @@ func main() {
 	for i := range readValues {
 		readValues[i] = unify(readValues[i])
 		fmt.Println(readValues[i])
+	}
+
+	fmt.Println("check if every value was on nodes once")
+	for i, v := range nodes {
+		h := map[int]bool{}
+		for _, vv := range v.dumpSeenValues() {
+			if h[vv] {
+				fmt.Printf("node #%d broken, has two or more %d\n", i, vv)
+			}
+			h[vv] = true
+		}
 	}
 }
