@@ -87,25 +87,26 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 
 	majority := (len(n.others) + 1) / 2
 
-	for {
-		DoViaQuorum(
-			ctx,
-			reads,
-			majority,
-		)
+	// for {
+	DoViaQuorum(
+		ctx,
+		reads,
+		majority,
+	)
 
-		timestamp += 1
+	timestamp += 1
 
-		err := DoViaQuorum(
-			ctx,
-			writes,
-			majority,
-		)
-		if err == nil {
-			break
-		}
-		// fmt.Println("write err: ", err, "gonna retry")
-	}
+	// err := DoViaQuorum(
+	DoViaQuorum(
+		ctx,
+		writes,
+		majority,
+	)
+	// if err == nil {
+	// 	break
+	// }
+	// fmt.Println("write err: ", err, "gonna retry")
+	// }
 	// fmt.Println("written: ", value)
 	return nil
 }

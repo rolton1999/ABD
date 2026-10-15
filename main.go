@@ -89,13 +89,21 @@ func main() {
 	}
 
 	fmt.Println("check if every value was on nodes once")
-	for i, v := range nodes {
+	replicated := map[int]int{}
+	for _, node := range nodes {
 		h := map[int]bool{}
-		for _, vv := range v.dumpSeenValues() {
-			if h[vv] {
-				fmt.Printf("node #%d broken, has two or more %d\n", i, vv)
+		for _, v := range node.dumpSeenValues() {
+			if h[v] {
+				panic("values not linearized on nodes")
 			}
-			h[vv] = true
+			h[v] = true
+			replicated[v] += 1
+		}
+	}
+	for k, v := range replicated {
+		if v < 2 {
+			fmt.Println(k, v, replicated)
+			panic("values are not replicated on majority")
 		}
 	}
 }
