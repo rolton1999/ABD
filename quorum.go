@@ -15,7 +15,7 @@ func DoViaQuorum(
 		panic(fmt.Sprintf("taking majority (%d) is impossible out of %d", majority, len(toDos)))
 	}
 
-	results := make(chan bool, len(toDos))
+	results := make(chan bool)
 	defer close(results)
 
 	wg := sync.WaitGroup{}
