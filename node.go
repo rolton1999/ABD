@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"sync"
 )
 
@@ -38,9 +37,26 @@ func NewNodes(n int) []Node {
 	return nodes
 }
 
+type Timestamp struct {
+	timestamp uint64
+	nodeID    int
+}
+
+func (t *Timestamp) Greater(other Timestamp) bool {
+	if t.timestamp == other.timestamp {
+		return t.nodeID > other.nodeID
+	}
+	return t.timestamp > other.timestamp
+}
+
+func (t *Timestamp) Inc(nodeID int) {
+	t.nodeID = nodeID
+	t.timestamp += 1
+}
+
 type StampedValue struct {
 	value     int
-	timestamp uint64
+	timestamp Timestamp
 }
 
 type nodeImpl struct {
@@ -59,7 +75,7 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 	// fmt.Printf("start writing on #%d node\n", n.index)
 
 	timestampMutex := sync.Mutex{}
-	var timestamp uint64
+	var timestamp Timestamp
 
 	var reads []func(context.Context) bool
 	for _, o := range n.others {
@@ -70,18 +86,12 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 			}
 
 			timestampMutex.Lock()
-			timestamp = max(sv.timestamp, timestamp)
+			if sv.timestamp.Greater(timestamp) {
+				timestamp = sv.timestamp
+			}
 			timestampMutex.Unlock()
 
 			return true
-		})
-	}
-
-	var writes []func(context.Context) bool
-	for _, o := range n.others {
-		writes = append(writes, func(ctx context.Context) bool {
-			err := o.localWrite(ctx, StampedValue{value, timestamp})
-			return err == nil
 		})
 	}
 
@@ -94,7 +104,15 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 		majority,
 	)
 
-	timestamp += 1
+	timestamp.Inc(n.index)
+
+	var writes []func(context.Context) bool
+	for _, o := range n.others {
+		writes = append(writes, func(ctx context.Context) bool {
+			err := o.localWrite(ctx, StampedValue{value, timestamp})
+			return err == nil
+		})
+	}
 
 	// err := DoViaQuorum(
 	DoViaQuorum(
@@ -125,9 +143,12 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 			}
 
 			mutext.Lock()
-			if readSv.timestamp >= sv.timestamp {
+			if readSv.timestamp.Greater(sv.timestamp) {
 				sv = readSv
 			}
+			// if readSv.timestamp >= sv.timestamp {
+			// 	sv = readSv
+			// }
 			if readSv.timestamp == sv.timestamp {
 				tsCount += 1
 			}
@@ -155,13 +176,13 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 	)
 
 	// help
-	if tsCount != majority {
-		DoViaQuorum(
-			ctx,
-			writes,
-			majority,
-		)
-	}
+	// if tsCount != majority {
+	DoViaQuorum(
+		ctx,
+		writes,
+		majority,
+	)
+	// }
 
 	// help
 	///		if err == nil {
@@ -181,16 +202,19 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 
 	if l > 0 {
 		last := n.stampedValues[l-1]
-		if last.timestamp > sv.timestamp {
-			return fmt.Errorf("keeped timestamp is greater than producing")
-		} else if last.timestamp == sv.timestamp {
-			if last.value != sv.value {
-				return fmt.Errorf("keeped timestamp is equal but value differs")
-			}
+		if last.timestamp.Greater(sv.timestamp) || last.timestamp == sv.timestamp {
 			return nil
-		} else if last.value == sv.value {
-			n.stampedValues[l-1].timestamp = sv.timestamp
-			return nil
+			// return fmt.Errorf("keeped timestamp is greater than producing")
+			//return nil
+			//} else if last.timestamp == sv.timestamp {
+			//	n.stampedValues[l-1].value = sv.value
+			//	// if last.value != sv.value {
+			//	// 	return fmt.Errorf("keeped timestamp is equal but value differs")
+			//	// }
+			//	return nil
+			//} else if last.value == sv.value {
+			//	n.stampedValues[l-1].timestamp = sv.timestamp
+			//	return nil
 		}
 	}
 

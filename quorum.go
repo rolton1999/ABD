@@ -37,21 +37,21 @@ func DoViaQuorum(
 		})
 	}
 
-	failed := 0
-	for majority > 0 && failed+majority != len(toDos) {
+	var fail, success int
+	for success < majority && fail+success != len(toDos) {
 		// fmt.Println("maj, f: ", majority, failed)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case r := <-results:
 			if r {
-				majority -= 1
+				success += 1
 			} else {
-				failed += 1
+				fail += 1
 			}
 		}
 	}
-	if failed == len(toDos) || majority > 0 {
+	if success < majority {
 		return fmt.Errorf("failed on quorum")
 	}
 

@@ -88,7 +88,6 @@ func main() {
 		fmt.Println(readValues[i])
 	}
 
-	fmt.Println("check if every value was on nodes once")
 	replicated := map[int]int{}
 	for _, node := range nodes {
 		h := map[int]bool{}
@@ -100,10 +99,17 @@ func main() {
 			replicated[v] += 1
 		}
 	}
+	notReplicated := map[int]bool{}
 	for k, v := range replicated {
 		if v < 2 {
-			fmt.Println(k, v, replicated)
-			panic("values are not replicated on majority")
+			notReplicated[k] = true
+		}
+	}
+	for i := range readValues {
+		for _, v := range readValues[i] {
+			if notReplicated[v] {
+				panic("reader have seen not replicated value")
+			}
 		}
 	}
 }
