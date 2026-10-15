@@ -38,19 +38,19 @@ func NewNodes(n int) []Node {
 }
 
 type Timestamp struct {
-	timestamp uint64
-	nodeID    int
+	timestamp         uint64
+	coordinatorNodeID int
 }
 
 func (t *Timestamp) Greater(other Timestamp) bool {
 	if t.timestamp == other.timestamp {
-		return t.nodeID > other.nodeID
+		return t.coordinatorNodeID > other.coordinatorNodeID
 	}
 	return t.timestamp > other.timestamp
 }
 
 func (t *Timestamp) Inc(nodeID int) {
-	t.nodeID = nodeID
+	t.coordinatorNodeID = nodeID
 	t.timestamp += 1
 }
 
@@ -95,7 +95,7 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 		})
 	}
 
-	majority := (len(n.others) + 1) / 2
+	majority := len(n.others)/2 + 1
 
 	// for {
 	DoViaQuorum(
@@ -145,11 +145,8 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 			mutext.Lock()
 			if readSv.timestamp.Greater(sv.timestamp) {
 				sv = readSv
-			}
-			// if readSv.timestamp >= sv.timestamp {
-			// 	sv = readSv
-			// }
-			if readSv.timestamp == sv.timestamp {
+				tsCount = 1
+			} else if readSv.timestamp.timestamp == sv.timestamp.timestamp {
 				tsCount += 1
 			}
 			mutext.Unlock()
@@ -166,23 +163,29 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 		})
 	}
 
-	majority := (len(n.others) + 1) / 2
+	majority := len(n.others)/2 + 1
 
-	// for {
-	DoViaQuorum(
-		ctx,
-		reads,
-		majority,
-	)
+	for {
+		DoViaQuorum(
+			ctx,
+			reads,
+			majority,
+		)
+		if tsCount >= majority {
+			break
+		}
 
-	// help
-	// if tsCount != majority {
-	DoViaQuorum(
-		ctx,
-		writes,
-		majority,
-	)
-	// }
+		// help
+		// if tsCount != majority {
+		err := DoViaQuorum(
+			ctx,
+			writes,
+			majority,
+		)
+		if err == nil {
+			break
+		}
+	}
 
 	// help
 	///		if err == nil {
