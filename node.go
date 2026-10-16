@@ -133,7 +133,7 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 	mutext := sync.Mutex{}
 	var sv StampedValue
-	var tsCount int
+	// var tsCount int
 
 	var reads []func(context.Context) bool
 	for _, o := range n.others {
@@ -146,9 +146,9 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 			mutext.Lock()
 			if readSv.timestamp.Greater(sv.timestamp) {
 				sv = readSv
-				tsCount = 1
-			} else if readSv.timestamp.timestamp == sv.timestamp.timestamp {
-				tsCount += 1
+				//		tsCount = 1
+				//	} else if readSv.timestamp.timestamp == sv.timestamp.timestamp {
+				//		tsCount += 1
 			}
 			mutext.Unlock()
 
@@ -172,9 +172,9 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 			reads,
 			majority,
 		)
-		if tsCount >= majority {
-			break
-		}
+		// if tsCount >= majority {
+		// 	break
+		// }
 
 		// help
 		// if tsCount != majority {
@@ -206,6 +206,9 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 
 	if l > 0 {
 		last := n.stampedValues[l-1]
+		if sv.timestamp == last.timestamp && sv.value == last.value {
+			return nil
+		}
 		// if last.timestamp.Greater(sv.timestamp) || last.timestamp == sv.timestamp {
 		if !sv.timestamp.Greater(last.timestamp) {
 			//return nil
@@ -222,6 +225,9 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 			//	return nil
 			// } else {
 			return fmt.Errorf("keeped timestamp is greater or eq than producing")
+		}
+		if sv.timestamp == last.timestamp && sv.value == last.value {
+			return fmt.Errorf("collistion of values on the same timestamp")
 		}
 	}
 
