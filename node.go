@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -97,34 +98,34 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 
 	majority := len(n.others)/2 + 1
 
-	// for {
-	DoViaQuorum(
-		ctx,
-		reads,
-		majority,
-	)
+	for {
+		DoViaQuorum(
+			ctx,
+			reads,
+			majority,
+		)
 
-	timestamp.Inc(n.index)
+		timestamp.Inc(n.index)
 
-	var writes []func(context.Context) bool
-	for _, o := range n.others {
-		writes = append(writes, func(ctx context.Context) bool {
-			err := o.localWrite(ctx, StampedValue{value, timestamp})
-			return err == nil
-		})
+		var writes []func(context.Context) bool
+		for _, o := range n.others {
+			writes = append(writes, func(ctx context.Context) bool {
+				err := o.localWrite(ctx, StampedValue{value, timestamp})
+				return err == nil
+			})
+		}
+
+		err := DoViaQuorum(
+			// DoViaQuorum(
+			ctx,
+			writes,
+			majority,
+		)
+		if err == nil {
+			break
+		}
+		// fmt.Println("write err: ", err, "gonna retry")
 	}
-
-	// err := DoViaQuorum(
-	DoViaQuorum(
-		ctx,
-		writes,
-		majority,
-	)
-	// if err == nil {
-	// 	break
-	// }
-	// fmt.Println("write err: ", err, "gonna retry")
-	// }
 	// fmt.Println("written: ", value)
 	return nil
 }
@@ -205,8 +206,9 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 
 	if l > 0 {
 		last := n.stampedValues[l-1]
-		if last.timestamp.Greater(sv.timestamp) || last.timestamp == sv.timestamp {
-			return nil
+		// if last.timestamp.Greater(sv.timestamp) || last.timestamp == sv.timestamp {
+		if !sv.timestamp.Greater(last.timestamp) {
+			//return nil
 			// return fmt.Errorf("keeped timestamp is greater than producing")
 			//return nil
 			//} else if last.timestamp == sv.timestamp {
@@ -218,6 +220,8 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 			//} else if last.value == sv.value {
 			//	n.stampedValues[l-1].timestamp = sv.timestamp
 			//	return nil
+			// } else {
+			return fmt.Errorf("keeped timestamp is greater or eq than producing")
 		}
 	}
 

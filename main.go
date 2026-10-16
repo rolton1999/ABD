@@ -61,7 +61,7 @@ func main() {
 			for {
 				v, e := c.Get(ctx)
 				_ = e
-				//fmt.Println(v, e)
+				// fmt.Println(v, e)
 				readValues[i] = append(readValues[i], v)
 				if stopConsume.Load() {
 					break
