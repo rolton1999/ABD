@@ -209,6 +209,9 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 		if sv.timestamp == last.timestamp && sv.value == last.value {
 			return nil
 		}
+		if sv.timestamp == last.timestamp && sv.value == last.value {
+			return fmt.Errorf("collistion of values on the same timestamp")
+		}
 		// if last.timestamp.Greater(sv.timestamp) || last.timestamp == sv.timestamp {
 		if !sv.timestamp.Greater(last.timestamp) {
 			//return nil
@@ -225,9 +228,6 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 			//	return nil
 			// } else {
 			return fmt.Errorf("keeped timestamp is greater or eq than producing")
-		}
-		if sv.timestamp == last.timestamp && sv.value == last.value {
-			return fmt.Errorf("collistion of values on the same timestamp")
 		}
 	}
 
