@@ -8,15 +8,13 @@ import (
 	"sync/atomic"
 )
 
-// ----------------------------------------------------------------------------
-
 func main() {
 	const (
 		nodesAmount     = 3
-		producersAmount = 3
-		consumersAmount = 3
+		producersAmount = 30
+		consumersAmount = 30
 
-		shouldBeWritten = 100
+		shouldBeWritten = 1_000_000
 	)
 
 	nodes := NewNodes(nodesAmount)
@@ -61,7 +59,6 @@ func main() {
 			for {
 				v, e := c.Get(ctx)
 				_ = e
-				// fmt.Println(v, e)
 				readValues[i] = append(readValues[i], v)
 				if stopConsume.Load() {
 					break
@@ -77,35 +74,41 @@ func main() {
 	stopConsume.Store(true)
 	wgConsumers.Wait()
 
-	fmt.Println("from nodes:")
-	for i := range nodes {
-		fmt.Println(nodes[i].dumpSeenValues())
-	}
+	// fmt.Println("from nodes:")
+	// for i := range nodes {
+	// 	fmt.Println(nodes[i].dumpSeenValues())
+	// }
 
 	fmt.Println("readers seen:")
 	for i := range readValues {
 		readValues[i] = unify(readValues[i])
-		fmt.Println(readValues[i])
+		fmt.Println(len(readValues[i]))
 	}
 
-	replicated := map[int]int{}
-	for _, node := range nodes {
+	replicated := map[int]map[int]bool{}
+	for i, node := range nodes {
 		h := map[int]bool{}
 		for _, v := range node.dumpSeenValues() {
 			if h[v] {
+				// helping phase can rewrite the save value on the same node or write retries
 				continue
-				// panic("values not linearized on nodes")
 			}
 			h[v] = true
-			replicated[v] += 1
+			if replicated[v] == nil {
+				replicated[v] = map[int]bool{}
+			}
+			replicated[v][i] = true
 		}
 	}
+
 	notReplicated := map[int]bool{}
 	for k, v := range replicated {
-		if v < 2 {
+		if len(v) < 2 {
 			notReplicated[k] = true
 		}
 	}
+
+	// every reader can read only replicated values
 	for i := range readValues {
 		for _, v := range readValues[i] {
 			if notReplicated[v] {

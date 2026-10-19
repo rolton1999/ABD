@@ -73,8 +73,6 @@ func (n *nodeImpl) addReplicas(others ...Node) {
 }
 
 func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
-	// fmt.Printf("start writing on #%d node\n", n.index)
-
 	timestampMutex := sync.Mutex{}
 	var timestamp Timestamp
 
@@ -107,6 +105,7 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 
 		timestamp.Inc(n.index)
 
+		// to capture the new incremented timestamp value
 		var writes []func(context.Context) bool
 		for _, o := range n.others {
 			writes = append(writes, func(ctx context.Context) bool {
@@ -116,7 +115,6 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 		}
 
 		err := DoViaQuorum(
-			// DoViaQuorum(
 			ctx,
 			writes,
 			majority,
@@ -124,16 +122,14 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 		if err == nil {
 			break
 		}
-		// fmt.Println("write err: ", err, "gonna retry")
 	}
-	// fmt.Println("written: ", value)
+
 	return nil
 }
 
 func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 	mutext := sync.Mutex{}
 	var sv StampedValue
-	// var tsCount int
 
 	var reads []func(context.Context) bool
 	for _, o := range n.others {
@@ -146,9 +142,6 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 			mutext.Lock()
 			if readSv.timestamp.Greater(sv.timestamp) {
 				sv = readSv
-				//		tsCount = 1
-				//	} else if readSv.timestamp.timestamp == sv.timestamp.timestamp {
-				//		tsCount += 1
 			}
 			mutext.Unlock()
 
@@ -172,12 +165,8 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 			reads,
 			majority,
 		)
-		// if tsCount >= majority {
-		// 	break
-		// }
 
-		// help
-		// if tsCount != majority {
+		// helping
 		err := DoViaQuorum(
 			ctx,
 			writes,
@@ -187,13 +176,6 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 			break
 		}
 	}
-
-	// help
-	///		if err == nil {
-	///			break
-	///		}
-	///		// fmt.Println("read err: ", err, "gonna retry")
-	///	}
 
 	return sv.value, nil
 }
@@ -212,21 +194,7 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 		if sv.timestamp == last.timestamp && sv.value == last.value {
 			return fmt.Errorf("collistion of values on the same timestamp")
 		}
-		// if last.timestamp.Greater(sv.timestamp) || last.timestamp == sv.timestamp {
 		if !sv.timestamp.Greater(last.timestamp) {
-			//return nil
-			// return fmt.Errorf("keeped timestamp is greater than producing")
-			//return nil
-			//} else if last.timestamp == sv.timestamp {
-			//	n.stampedValues[l-1].value = sv.value
-			//	// if last.value != sv.value {
-			//	// 	return fmt.Errorf("keeped timestamp is equal but value differs")
-			//	// }
-			//	return nil
-			//} else if last.value == sv.value {
-			//	n.stampedValues[l-1].timestamp = sv.timestamp
-			//	return nil
-			// } else {
 			return fmt.Errorf("keeped timestamp is greater or eq than producing")
 		}
 	}
@@ -236,7 +204,6 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 }
 
 func (n *nodeImpl) localRead(ctx context.Context) (StampedValue, error) {
-	// fmt.Printf("attempt to read from #%d node with\n", n.index)
 	n.valuesMutex.RLock()
 	defer n.valuesMutex.RUnlock()
 
@@ -247,7 +214,6 @@ func (n *nodeImpl) localRead(ctx context.Context) (StampedValue, error) {
 }
 
 func (n *nodeImpl) dumpSeenValues() []int {
-	// fmt.Println(n.stampedValues)
 	var ans []int
 	for _, v := range n.stampedValues {
 		ans = append(ans, v.value)
