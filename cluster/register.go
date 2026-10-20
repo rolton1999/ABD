@@ -1,4 +1,4 @@
-package main
+package cluster
 
 import (
 	"context"
@@ -7,19 +7,19 @@ import (
 
 type Register interface {
 	Write(ctx context.Context, value int) error
-	Read(ctx context.Context) (value int, err error)
+	Read(ctx context.Context) (value StampedValue, err error)
 }
 
-func NewRegister(nodes ...Node) Register {
-	if len(nodes) == 0 {
+func NewRegister(coordinators ...Coordinator) Register {
+	if len(coordinators) == 0 {
 		panic("trying to setup proxy without nodex")
 	}
-	return &proxyRegister{atomic.Uint64{}, nodes}
+	return &proxyRegister{atomic.Uint64{}, coordinators}
 }
 
 type proxyRegister struct {
 	index atomic.Uint64
-	nodes []Node
+	nodes []Coordinator
 }
 
 func (s *proxyRegister) Write(ctx context.Context, value int) error {
@@ -27,7 +27,7 @@ func (s *proxyRegister) Write(ctx context.Context, value int) error {
 	return s.nodes[nodeIndex].ABDWrite(ctx, value)
 }
 
-func (s *proxyRegister) Read(ctx context.Context) (int, error) {
+func (s *proxyRegister) Read(ctx context.Context) (StampedValue, error) {
 	nodeIndex := s.getNodeIndex()
 	return s.nodes[nodeIndex].ABDRead(ctx)
 }

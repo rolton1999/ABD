@@ -1,4 +1,5 @@
-package main
+// Package cluster: Attiya, Bar-Noy, and Dolev
+package cluster
 
 import (
 	"context"
@@ -6,19 +7,26 @@ import (
 	"sync"
 )
 
-type Node interface {
+type Coordinator interface {
 	ABDWrite(ctx context.Context, value int) error
-	ABDRead(ctx context.Context) (int, error)
+	ABDRead(ctx context.Context) (StampedValue, error)
 
-	addReplicas(...Node)
-
-	localRead(ctx context.Context) (StampedValue, error)
-	localWrite(ctx context.Context, value StampedValue) error
-
-	dumpSeenValues() []int
+	DumpActions() []int
 }
 
-func NewNode(index int) Node {
+type replica interface {
+	localRead(ctx context.Context) (StampedValue, error)
+	localWrite(ctx context.Context, value StampedValue) error
+}
+
+type node interface {
+	Coordinator
+	replica
+
+	addReplicas(...node)
+}
+
+func newNode(index int) node {
 	return &nodeImpl{
 		index:         index,
 		others:        nil,
@@ -27,48 +35,32 @@ func NewNode(index int) Node {
 	}
 }
 
-func NewNodes(n int) []Node {
-	var nodes []Node
+func NewCluster(n int) []Coordinator {
+	nodes := make([]node, 0, n)
 	for i := range n {
-		nodes = append(nodes, NewNode(i))
+		nodes = append(nodes, newNode(i))
 	}
 	for i := range n {
 		nodes[i].addReplicas(nodes...)
 	}
-	return nodes
-}
 
-type Timestamp struct {
-	timestamp         uint64
-	coordinatorNodeID int
-}
-
-func (t *Timestamp) Greater(other Timestamp) bool {
-	if t.timestamp == other.timestamp {
-		return t.coordinatorNodeID > other.coordinatorNodeID
+	coordinators := make([]Coordinator, n)
+	for i := range n {
+		coordinators[i] = nodes[i].(Coordinator)
 	}
-	return t.timestamp > other.timestamp
-}
 
-func (t *Timestamp) Inc(nodeID int) {
-	t.coordinatorNodeID = nodeID
-	t.timestamp += 1
-}
-
-type StampedValue struct {
-	value     int
-	timestamp Timestamp
+	return coordinators
 }
 
 type nodeImpl struct {
 	index  int
-	others []Node
+	others []node
 
 	valuesMutex   sync.RWMutex
 	stampedValues []StampedValue
 }
 
-func (n *nodeImpl) addReplicas(others ...Node) {
+func (n *nodeImpl) addReplicas(others ...node) {
 	n.others = append(n.others, others...)
 }
 
@@ -85,8 +77,8 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 			}
 
 			timestampMutex.Lock()
-			if sv.timestamp.Greater(timestamp) {
-				timestamp = sv.timestamp
+			if sv.Timestamp.Greater(timestamp) {
+				timestamp = sv.Timestamp
 			}
 			timestampMutex.Unlock()
 
@@ -127,7 +119,7 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 	return nil
 }
 
-func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
+func (n *nodeImpl) ABDRead(ctx context.Context) (StampedValue, error) {
 	mutext := sync.Mutex{}
 	var sv StampedValue
 
@@ -140,7 +132,7 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 			}
 
 			mutext.Lock()
-			if readSv.timestamp.Greater(sv.timestamp) {
+			if readSv.Timestamp.Greater(sv.Timestamp) {
 				sv = readSv
 			}
 			mutext.Unlock()
@@ -177,7 +169,7 @@ func (n *nodeImpl) ABDRead(ctx context.Context) (int, error) {
 		}
 	}
 
-	return sv.value, nil
+	return sv, nil
 }
 
 func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
@@ -188,13 +180,10 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 
 	if l > 0 {
 		last := n.stampedValues[l-1]
-		if sv.timestamp == last.timestamp && sv.value == last.value {
+		if sv.Timestamp == last.Timestamp && sv.Value == last.Value {
 			return nil
 		}
-		if sv.timestamp == last.timestamp && sv.value == last.value {
-			return fmt.Errorf("collistion of values on the same timestamp")
-		}
-		if !sv.timestamp.Greater(last.timestamp) {
+		if !sv.Timestamp.Greater(last.Timestamp) {
 			return fmt.Errorf("keeped timestamp is greater or eq than producing")
 		}
 	}
@@ -213,10 +202,10 @@ func (n *nodeImpl) localRead(ctx context.Context) (StampedValue, error) {
 	return n.stampedValues[len(n.stampedValues)-1], nil
 }
 
-func (n *nodeImpl) dumpSeenValues() []int {
+func (n *nodeImpl) DumpActions() []int {
 	var ans []int
 	for _, v := range n.stampedValues {
-		ans = append(ans, v.value)
+		ans = append(ans, v.Value)
 	}
 	return ans
 }

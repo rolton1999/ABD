@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+
+	"abd/client"
+	"abd/cluster"
 )
 
 func main() {
@@ -17,9 +20,9 @@ func main() {
 		shouldBeWritten = 1_000_000
 	)
 
-	nodes := NewNodes(nodesAmount)
-	newRegister := func() Register {
-		return NewRegister(nodes...)
+	nodes := cluster.NewCluster(nodesAmount)
+	newRegister := func() cluster.Register {
+		return cluster.NewRegister(nodes...)
 	}
 
 	producers := createClients(producersAmount, newRegister)
@@ -88,7 +91,7 @@ func main() {
 	replicated := map[int]map[int]bool{}
 	for i, node := range nodes {
 		h := map[int]bool{}
-		for _, v := range node.dumpSeenValues() {
+		for _, v := range node.DumpActions() {
 			if h[v] {
 				// helping phase can rewrite the save value on the same node or write retries
 				continue
@@ -116,12 +119,21 @@ func main() {
 			}
 		}
 	}
+	// check if of all read for every reader were monotonic
+	for _, c := range consumers {
+		sv := c.DumpSeenValues()
+		for j := 1; j < len(sv); j++ {
+			if sv[j-1].Timestamp.Greater(sv[j].Timestamp) {
+				panic("reader have seen not monotonic writes")
+			}
+		}
+	}
 }
 
-func createClients(n int, newRegister func() Register) []Client {
-	var clients []Client
+func createClients(n int, newRegister func() cluster.Register) []client.Client {
+	var clients []client.Client
 	for range n {
-		clients = append(clients, NewClient(newRegister()))
+		clients = append(clients, client.NewClient(newRegister()))
 	}
 	return clients
 }
