@@ -31,18 +31,20 @@ func main() {
 
 	value := atomic.Int32{}
 
+	observer := NewObserver()
 	wgProducers := sync.WaitGroup{}
 	startProduce := make(chan struct{})
 
-	for i, p := range producers {
+	for i := range producers {
 		wgProducers.Go(func() {
+			setter := NewObservedSetter(observer, producers[i])
 			<-startProduce
 			for {
 				next := value.Add(1)
 				if next > shouldBeWritten {
 					break
 				}
-				e := p.Set(ctx, int(next))
+				e := setter.Set(ctx, int(next))
 				if e != nil {
 					panic("cannot write")
 				}
@@ -56,11 +58,12 @@ func main() {
 	startConsume := make(chan struct{})
 	stopConsume := atomic.Bool{}
 	readValues := [consumersAmount][]int{}
-	for i, c := range consumers {
+	for i := range consumers {
 		wgConsumers.Go(func() {
+			getter := NewObservedGetter(observer, consumers[i])
 			<-startConsume
 			for {
-				v, e := c.Get(ctx)
+				v, e := getter.Get(ctx)
 				_ = e
 				readValues[i] = append(readValues[i], v)
 				if stopConsume.Load() {
@@ -76,11 +79,6 @@ func main() {
 	wgProducers.Wait()
 	stopConsume.Store(true)
 	wgConsumers.Wait()
-
-	// fmt.Println("from nodes:")
-	// for i := range nodes {
-	// 	fmt.Println(nodes[i].dumpSeenValues())
-	// }
 
 	fmt.Println("readers seen:")
 	for i := range readValues {
@@ -119,6 +117,7 @@ func main() {
 			}
 		}
 	}
+
 	// check if of all read for every reader were monotonic
 	for _, c := range consumers {
 		sv := c.DumpSeenValues()
@@ -127,6 +126,11 @@ func main() {
 				panic("reader have seen not monotonic writes")
 			}
 		}
+	}
+
+	// linearization
+	if !observer.CheckLinearization() {
+		panic("not linearized")
 	}
 }
 

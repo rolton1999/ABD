@@ -6,9 +6,17 @@ import (
 	"abd/cluster"
 )
 
-type Client interface {
+type Setter interface {
 	Set(ctx context.Context, value int) error
+}
+
+type Getter interface {
 	Get(ctx context.Context) (value int, err error)
+}
+
+type Client interface {
+	Setter
+	Getter
 
 	DumpSeenValues() []cluster.StampedValue
 }
