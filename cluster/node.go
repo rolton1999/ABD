@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 type Coordinator interface {
@@ -28,10 +29,11 @@ type node interface {
 
 func newNode(index int) node {
 	return &nodeImpl{
-		index:         index,
-		others:        nil,
-		valuesMutex:   sync.RWMutex{},
-		stampedValues: nil,
+		index:              index,
+		others:             nil,
+		timestampTieBraker: atomic.Uint64{},
+		valuesMutex:        sync.RWMutex{},
+		stampedValues:      nil,
 	}
 }
 
@@ -55,6 +57,8 @@ func NewCluster(n int) []Coordinator {
 type nodeImpl struct {
 	index  int
 	others []node
+
+	timestampTieBraker atomic.Uint64
 
 	valuesMutex   sync.RWMutex
 	stampedValues []StampedValue
@@ -95,7 +99,16 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 			majority,
 		)
 
-		timestamp.Inc(n.index)
+		// same result as with n.index as tiebreaker
+		// timestamp.Inc(0)
+
+		// 30 producers, 30 consumers, 10kk vals: producers done in 1m6.532859625s
+		// 2 procuders, 2 consumers, 10 vals: producers done in 244.416µs
+		// timestamp.Inc(uint64(n.index))
+
+		// 30 producers, 30 consumers, 10kk vals: producers done in 58.474119084s
+		// 2 procuders, 2 consumers, 10 vals: producers done in 162.167µs
+		timestamp.Inc(n.timestampTieBraker.Add(1))
 
 		// to capture the new incremented timestamp value
 		var writes []func(context.Context) bool

@@ -6,20 +6,42 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"abd/client"
 	"abd/cluster"
+	observerP "abd/observer"
 )
 
 func main() {
-	const (
-		nodesAmount     = 3
-		producersAmount = 30
-		consumersAmount = 30
+	start := time.Now()
+	//check(
+	//	/*nodesAmount*/ 3,
+	//	/*producersAmount*/ 30,
+	//	/*consumersAmount*/ 30,
+	//	/*shouldBeWritten*/ 10_000_000,
+	//	/*checkLinearization*/ false,
+	//)
 
-		shouldBeWritten = 1_000_000
-	)
+	for range 1000 {
+		check(
+			/*nodesAmount*/ 3,
+			/*producersAmount*/ 2,
+			/*consumersAmount*/ 2,
+			/*shouldBeWritten*/ 10,
+			/*checkLinearization*/ true,
+		)
+	}
+	fmt.Println("checked in", time.Since(start))
+}
 
+func check(
+	nodesAmount int,
+	producersAmount int,
+	consumersAmount int,
+	shouldBeWritten int,
+	checkLinearization bool,
+) {
 	nodes := cluster.NewCluster(nodesAmount)
 	newRegister := func() cluster.Register {
 		return cluster.NewRegister(nodes...)
@@ -31,17 +53,21 @@ func main() {
 
 	value := atomic.Int32{}
 
-	observer := NewObserver()
+	observer := observerP.NewObserver()
 	wgProducers := sync.WaitGroup{}
 	startProduce := make(chan struct{})
 
+	var producersTimingMutex sync.Mutex
+	var producersTiming time.Duration
+
 	for i := range producers {
 		wgProducers.Go(func() {
-			setter := NewObservedSetter(observer, producers[i])
+			setter := observerP.NewObservedSetter(observer, producers[i])
 			<-startProduce
+			start := time.Now()
 			for {
 				next := value.Add(1)
-				if next > shouldBeWritten {
+				if next > int32(shouldBeWritten) {
 					break
 				}
 				e := setter.Set(ctx, int(next))
@@ -49,6 +75,9 @@ func main() {
 					panic("cannot write")
 				}
 			}
+			producersTimingMutex.Lock()
+			defer producersTimingMutex.Unlock()
+			producersTiming = max(producersTiming, time.Since(start))
 			fmt.Println(i, "writing done!")
 		})
 	}
@@ -57,10 +86,10 @@ func main() {
 	wgConsumers := sync.WaitGroup{}
 	startConsume := make(chan struct{})
 	stopConsume := atomic.Bool{}
-	readValues := [consumersAmount][]int{}
+	readValues := make([][]int, consumersAmount)
 	for i := range consumers {
 		wgConsumers.Go(func() {
-			getter := NewObservedGetter(observer, consumers[i])
+			getter := observerP.NewObservedGetter(observer, consumers[i])
 			<-startConsume
 			for {
 				v, e := getter.Get(ctx)
@@ -80,7 +109,9 @@ func main() {
 	stopConsume.Store(true)
 	wgConsumers.Wait()
 
-	fmt.Println("readers seen:")
+	fmt.Println("producers done in", producersTiming)
+
+	fmt.Println("how many different values readers seen:")
 	for i := range readValues {
 		readValues[i] = unify(readValues[i])
 		fmt.Println(len(readValues[i]))
@@ -128,9 +159,13 @@ func main() {
 		}
 	}
 
-	// linearization
-	if !observer.CheckLinearization() {
-		panic("not linearized")
+	if checkLinearization {
+		start := time.Now()
+		if !observer.CheckLinearization() {
+			panic("not linearized")
+		} else {
+			fmt.Println("Linearization: linealized! checked in", time.Since(start))
+		}
 	}
 }
 

@@ -1,19 +1,19 @@
 package cluster
 
 type Timestamp struct {
-	counter           uint64
-	coordinatorNodeID int
+	counter               uint64
+	coordinatorTieBreaker uint64
 }
 
 func (t *Timestamp) Greater(other Timestamp) bool {
 	if t.counter == other.counter {
-		return t.coordinatorNodeID > other.coordinatorNodeID
+		return t.coordinatorTieBreaker > other.coordinatorTieBreaker
 	}
 	return t.counter > other.counter
 }
 
-func (t *Timestamp) Inc(nodeID int) {
-	t.coordinatorNodeID = nodeID
+func (t *Timestamp) Inc(coordinatorTieBreaker uint64) {
+	t.coordinatorTieBreaker = coordinatorTieBreaker
 	t.counter += 1
 }
 
