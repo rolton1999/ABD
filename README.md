@@ -104,6 +104,50 @@ with value `0`, every read must return the latest preceding write's value.
 Backtracking and memoization search for one ordering containing every operation
 exactly once.
 
+### Backtracking and pruning
+
+The checker builds a candidate sequence one operation at a time, carrying the
+set of placed operations and the current register value. A write changes that
+value; a read must match it. If a choice cannot lead to a complete legal
+sequence, the search removes that choice and tries another. One complete valid
+sequence is enough for success; it does not need to enumerate all linearizations.
+
+The search prunes branches in three ways:
+
+- **Read results:** a read returning a value different from the current register
+  value cannot be selected next.
+- **Real-time precedence:** after selecting an operation, the recursive call
+  rejects it if an unplaced operation finished before it started. This prevents
+  a candidate sequence from reversing required real-time order.
+- **Memoization:** after precedence validation, the checker records the placed
+  operation mask and current register value. Different valid prefixes reaching
+  the same state have the same remaining operations and possible continuations,
+  so the search need not explore that state twice. The key represents a search
+  state, not the full order of the prefix.
+
+Sorting by invocation time alone cannot replace this search: overlapping
+operations may need to take effect in the opposite order from their starts.
+Checking each read independently is also insufficient; every read and write
+must fit into one common sequential history.
+
+Pruning reduces work but does not guarantee a cheap search. Without pruning,
+there can be up to `n!` candidate operation orders. With exact state
+memoization, many prefixes merge, but the number of placed-operation subsets
+can still grow exponentially. Extensive overlap creates choices; real-time
+constraints and read results eliminate choices. Runtime therefore depends on
+the history's structure as well as its length. The current checker has a size
+limit but no timeout, and even a history below the limit can be expensive.
+
+The initial-call loop tries each operation index with a fresh cache and empty
+placed set. This compensates for the initial precedence check, but repeats
+search work rather than explicitly fixing a different first operation.
+
+For this checker, an exhaustive search returning `false` means no legal ordering
+was found under its model and supported key range. Skipping a history means it
+was not checked. Finding a valid ordering checks only that recorded execution;
+it does not explore all possible goroutine schedules. These conclusions also
+depend on correct history recording and a correct checker implementation.
+
 Current checker limits:
 
 - Histories longer than 32 operations are skipped. The temporary bypass returns
