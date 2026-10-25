@@ -58,8 +58,7 @@ Passing a check validates the recorded execution, not every possible schedule.
 This project is a concurrency experiment. Replica state and diagnostic
 histories are held in memory; network and replica failures are not simulated.
 The quorum helper waits for all workers to finish even after reaching a
-majority. Quorum error handling and cancellation remain incomplete, and the
-observer assumes successful operations.
+majority. 
 
 ## Reference
 
