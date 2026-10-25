@@ -33,6 +33,16 @@ counters take precedence; for equal counters, smaller allocation numbers and
 then smaller coordinator IDs take precedence. These fields distinguish concurrent
 writes within the current process, assuming no overflow.
 
+Tag uniqueness follows from allocation as well as the `Timestamp` structure:
+`ABDWrite` obtains its allocation number with the coordinator's atomic
+`timestampTieBraker.Add(1)`. Concurrent writes through the same coordinator get
+different allocation numbers; writes through different coordinators have
+different coordinator IDs. Thus distinct writes cannot have identical tags
+within one cluster lifetime, assuming neither counter wraps and coordinators
+are not restarted with reset allocation state. Incrementing the maximum
+observed counter makes the new tag greater than every tag observed by the query,
+regardless of the ordering of the secondary fields.
+
 A write queries replicas, selects the maximum observed tag, increments its
 counter, and assigns a unique tag to the logical write. It propagates that same
 tagged value and waits for majority acknowledgments. It does not publish fresh
@@ -59,6 +69,21 @@ The executable checks two properties:
 - Each individual reader observes nondecreasing tags across its sequential reads.
 - The observer searches for a legal sequential ordering of a small recorded
   history that preserves real-time precedence.
+
+The monotonicity assertion in `main.go` checks **reader observations**, not the
+internal history of each replica. It compares consecutive returned tags for
+each client whose reads are sequential. Replica-state monotonicity is enforced
+separately by `localWrite` in `cluster/node.go`: while holding the replica's
+mutex, it appends a new pair only when its tag is strictly greater than the
+current tag. Equal or older requests leave state unchanged. There is currently
+no separate assertion that scans replica tag histories in `main.go`.
+
+Goroutines and mutex-protected replica operations provide a model in which the
+ABD safety argument can be applied: scheduling supplies request interleavings,
+and each local replica operation is atomic. Unique write tags and monotonic
+replica state are implementation invariants supporting that argument; the
+history checker independently tests observable register behavior on recorded
+executions.
 
 The observer records operation kind, input or returned value, and invocation and
 response event numbers from one shared atomic counter. These event numbers are
