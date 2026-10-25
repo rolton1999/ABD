@@ -70,6 +70,17 @@ The executable checks two properties:
 - The observer searches for a legal sequential ordering of a small recorded
   history that preserves real-time precedence.
 
+The second check is a **linearizability check**. A candidate ordering must
+contain every completed operation exactly once, with its actual input and
+result. It is legal when each read returns the latest preceding write's value,
+or the initial `0` if no write precedes it. It preserves real-time precedence
+when an operation that finishes before another starts also appears before it
+in the ordering. Overlapping operations may be ordered either way, provided
+the entire sequence remains legal.
+
+Finding such an ordering establishes that the recorded history is
+**linearizable**. The ordering itself is **a linearization** of that history.
+
 The monotonicity assertion in `main.go` checks **reader observations**, not the
 internal history of each replica. It compares consecutive returned tags for
 each client whose reads are sequential. Replica-state monotonicity is enforced
