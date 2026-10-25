@@ -3,7 +3,6 @@ package cluster
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 )
@@ -92,42 +91,43 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 
 	majority := len(n.others)/2 + 1
 
-	for {
-		DoViaQuorum(
-			ctx,
-			reads,
-			majority,
-		)
+	// for {
+	DoViaQuorum(
+		ctx,
+		reads,
+		majority,
+	)
 
-		// same result as with n.index as tiebreaker
-		// timestamp.Inc(0)
+	// same result as with n.index as tiebreaker
+	// timestamp.Inc(0)
 
-		// 30 producers, 30 consumers, 10kk vals: producers done in 1m6.532859625s
-		// 2 procuders, 2 consumers, 10 vals: producers done in 244.416µs
-		// timestamp.Inc(uint64(n.index))
+	// 30 producers, 30 consumers, 10kk vals: producers done in 1m6.532859625s
+	// 2 procuders, 2 consumers, 10 vals: producers done in 244.416µs
+	// timestamp.Inc(uint64(n.index))
 
-		// 30 producers, 30 consumers, 10kk vals: producers done in 58.474119084s
-		// 2 procuders, 2 consumers, 10 vals: producers done in 162.167µs
-		timestamp.Inc(n.timestampTieBraker.Add(1), n.index)
+	// 30 producers, 30 consumers, 10kk vals: producers done in 58.474119084s
+	// 2 procuders, 2 consumers, 10 vals: producers done in 162.167µs
+	timestamp.Inc(n.timestampTieBraker.Add(1), n.index)
 
-		// to capture the new incremented timestamp value
-		var writes []func(context.Context) bool
-		for _, o := range n.others {
-			writes = append(writes, func(ctx context.Context) bool {
-				err := o.localWrite(ctx, StampedValue{value, timestamp})
-				return err == nil
-			})
-		}
-
-		err := DoViaQuorum(
-			ctx,
-			writes,
-			majority,
-		)
-		if err == nil {
-			break
-		}
+	// to capture the new incremented timestamp value
+	var writes []func(context.Context) bool
+	for _, o := range n.others {
+		writes = append(writes, func(ctx context.Context) bool {
+			err := o.localWrite(ctx, StampedValue{value, timestamp})
+			return err == nil
+		})
 	}
+
+	// err := DoViaQuorum(
+	DoViaQuorum(
+		ctx,
+		writes,
+		majority,
+	)
+	// if err == nil {
+	// 	break
+	// }
+	// }
 
 	return nil
 }
@@ -197,7 +197,9 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 			return nil
 		}
 		if !sv.Timestamp.Greater(last.Timestamp) {
-			return fmt.Errorf("keeped timestamp is greater or eq than producing")
+			// just ack
+			return nil
+			// return fmt.Errorf("keeped timestamp is greater or eq than producing")
 		}
 	}
 
