@@ -38,10 +38,15 @@ subsequent non-overlapping reads cannot return an older tag.
 
 ## Validation
 
-Each experiment checks that individual readers observe nondecreasing tags.
-The observer also records operation inputs, results, and invocation/response
-order, then uses backtracking with memoization to search for a legal sequential
-history that preserves real-time precedence.
+Each experiment validates two properties:
+
+- **Linearizability:** the recorded reads and writes admit one sequential
+  ordering that preserves real-time precedence. Each read returns the latest
+  preceding write's value, or the initial `0` if no write precedes it. The
+  observer searches for this ordering using backtracking with memoization.
+- **Reader monotonicity:** each reader performs reads sequentially and observes
+  nondecreasing tags. A later read by the same reader must never return an older
+  version, even when writes overlap. This check compares tags, not numeric values.
 
 The checker has practical limits:
 
