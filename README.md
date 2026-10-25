@@ -1,7 +1,7 @@
 # ABD replicated register
 
-A Go learning project implementing an in-memory, multiwriter variant of the
-Attiya–Bar-Noy–Dolev (ABD) atomic register algorithm. Goroutines model concurrent
+I mplementing an in-memory, multiwriter variant of the Attiya–Bar-Noy–Dolev 
+(ABD) atomic register algorithm. Goroutines model concurrent
 clients and replica requests. The experiment assumes all replicas respond and
 operations use a background context; it does not simulate network or replica
 failures.
@@ -24,16 +24,6 @@ The default workload runs 1,000 independent experiments with three replicas,
 two writers, two readers, and ten writes per experiment. Readers run until the
 writers finish. Change the arguments in `main.go` to explore other workloads;
 there are no command-line flags.
-
-Basic build and static checks:
-
-```sh
-go test ./...
-go vet ./...
-```
-
-There are currently no automated test files. The executable runs the concurrent
-experiments and assertions.
 
 ## Protocol
 
@@ -90,15 +80,6 @@ Current checker limits:
 
 Passing these experiments is evidence about recorded executions, not a proof of
 correctness for every possible schedule.
-
-## Layout and scope
-
-| Path | Responsibility |
-| --- | --- |
-| `main.go` | Workload configuration, concurrent experiments, and assertions |
-| `client/` | Client API and per-client read histories |
-| `cluster/` | Coordinators, replicas, tags, quorum operations, and register routing |
-| `observer/` | Operation recording and bounded linearizability checking |
 
 This is a concurrency experiment rather than a production storage system.
 Replica state and diagnostic histories live in memory. The quorum helper waits
