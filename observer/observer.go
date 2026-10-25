@@ -52,10 +52,6 @@ func (c *observerImpl) CheckLinearization() bool {
 	c.resultsMutex.Lock()
 	defer c.resultsMutex.Unlock()
 
-	// fmt.Println("concurrent history:", len(c.results), c.results)
-	// sort.Slice(c.results, func(i, j int) bool {
-	// 	return c.results[i].start < c.results[j].start
-	// })
 	fmt.Println("History len: ", len(c.results))
 	if len(c.results) == 0 {
 		return true
@@ -80,7 +76,7 @@ func (c *observerImpl) CheckLinearization() bool {
 	return false
 }
 
-const maxCheckableLenOfHistory = 25
+const maxCheckableLenOfHistory = 32
 
 func check(
 	lastWrittenValue int,
@@ -102,7 +98,6 @@ func check(
 		}
 	}
 
-	// nowSeq := cur | (1 << i)
 	seqKey := cur | uint64(lastWrittenValue)<<maxCheckableLenOfHistory
 	if sequencesAlreadyChecked[seqKey] {
 		return false

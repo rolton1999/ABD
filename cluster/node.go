@@ -91,7 +91,6 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 
 	majority := len(n.others)/2 + 1
 
-	// for {
 	DoViaQuorum(
 		ctx,
 		reads,
@@ -118,16 +117,11 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 		})
 	}
 
-	// err := DoViaQuorum(
 	DoViaQuorum(
 		ctx,
 		writes,
 		majority,
 	)
-	// if err == nil {
-	// 	break
-	// }
-	// }
 
 	return nil
 }
@@ -197,9 +191,8 @@ func (n *nodeImpl) localWrite(ctx context.Context, sv StampedValue) error {
 			return nil
 		}
 		if !sv.Timestamp.Greater(last.Timestamp) {
-			// just ack
+			// just ack and do nothing
 			return nil
-			// return fmt.Errorf("keeped timestamp is greater or eq than producing")
 		}
 	}
 

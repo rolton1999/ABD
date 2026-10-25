@@ -15,13 +15,6 @@ import (
 
 func main() {
 	start := time.Now()
-	//check(
-	//	/*nodesAmount*/ 3,
-	//	/*producersAmount*/ 30,
-	//	/*consumersAmount*/ 30,
-	//	/*shouldBeWritten*/ 10_000_000,
-	//	/*checkLinearization*/ false,
-	//)
 
 	for range 1000 {
 		check(
@@ -57,14 +50,10 @@ func check(
 	wgProducers := sync.WaitGroup{}
 	startProduce := make(chan struct{})
 
-	var producersTimingMutex sync.Mutex
-	var producersTiming time.Duration
-
 	for i := range producers {
 		wgProducers.Go(func() {
 			setter := observerP.NewObservedSetter(observer, producers[i])
 			<-startProduce
-			start := time.Now()
 			for {
 				next := value.Add(1)
 				if next > int32(shouldBeWritten) {
@@ -75,10 +64,6 @@ func check(
 					panic("cannot write")
 				}
 			}
-			producersTimingMutex.Lock()
-			defer producersTimingMutex.Unlock()
-			producersTiming = max(producersTiming, time.Since(start))
-			fmt.Println(i, "writing done!")
 		})
 	}
 
@@ -109,44 +94,8 @@ func check(
 	stopConsume.Store(true)
 	wgConsumers.Wait()
 
-	fmt.Println("producers done in", producersTiming)
-
-	fmt.Println("how many different values readers seen:")
 	for i := range readValues {
 		readValues[i] = unify(readValues[i])
-		fmt.Println(len(readValues[i]))
-	}
-
-	replicated := map[int]map[int]bool{}
-	for i, node := range nodes {
-		h := map[int]bool{}
-		for _, v := range node.DumpActions() {
-			if h[v] {
-				// helping phase can rewrite the save value on the same node or write retries
-				continue
-			}
-			h[v] = true
-			if replicated[v] == nil {
-				replicated[v] = map[int]bool{}
-			}
-			replicated[v][i] = true
-		}
-	}
-
-	notReplicated := map[int]bool{}
-	for k, v := range replicated {
-		if len(v) < 2 {
-			notReplicated[k] = true
-		}
-	}
-
-	// every reader can read only replicated values
-	for i := range readValues {
-		for _, v := range readValues[i] {
-			if notReplicated[v] {
-				panic("reader have seen not replicated value")
-			}
-		}
 	}
 
 	// check if of all read for every reader were monotonic

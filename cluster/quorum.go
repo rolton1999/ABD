@@ -29,17 +29,14 @@ func DoViaQuorum(
 			success := doFunc(ctx)
 			select {
 			case <-ctx.Done():
-				// fmt.Println("gone by conext done")
 				return
 			case results <- success:
 			}
-			// fmt.Println("sucess written")
 		})
 	}
 
 	var fail, success int
 	for success < majority && fail+success != len(toDos) {
-		// fmt.Println("maj, f: ", majority, failed)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
