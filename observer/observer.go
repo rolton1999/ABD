@@ -57,22 +57,28 @@ func (c *observerImpl) CheckLinearization() bool {
 	// 	return c.results[i].start < c.results[j].start
 	// })
 	fmt.Println("History len: ", len(c.results))
+	if len(c.results) == 0 {
+		return true
+	}
 	if len(c.results) > maxCheckableLenOfHistory {
 		fmt.Println("History is too big to check")
 		return true
 	}
-	current = nil
-	return check(
-		0,
-		map[int]bool{},
-		map[uint64]bool{},
-		c.results,
-		0,
-		uint64(0),
-	)
+	for i := range c.results {
+		linearized := check(
+			0,
+			map[int]bool{},
+			map[uint64]bool{},
+			c.results,
+			i,
+			uint64(0),
+		)
+		if linearized {
+			return true
+		}
+	}
+	return false
 }
-
-var current []result
 
 const maxCheckableLenOfHistory = 25
 
@@ -85,9 +91,23 @@ func check(
 	cur uint64,
 ) bool {
 	if len(resultsAlreadyAdded) == len(results) {
-		// fmt.Println(current)
 		return true
 	}
+
+	// main linearization check
+	for j, r := range results {
+		if r.end <= results[i].start && !resultsAlreadyAdded[j] {
+			delete(resultsAlreadyAdded, j)
+			return false
+		}
+	}
+
+	// nowSeq := cur | (1 << i)
+	seqKey := cur | uint64(lastWrittenValue)<<maxCheckableLenOfHistory
+	if sequencesAlreadyChecked[seqKey] {
+		return false
+	}
+	sequencesAlreadyChecked[seqKey] = true
 
 	for j, r := range results {
 		if r.kind == getOperation && r.seenWrittenValue != lastWrittenValue {
@@ -102,25 +122,16 @@ func check(
 		}
 		resultsAlreadyAdded[j] = true
 
-		seq := cur | (1 << j) | uint64(lastWrittenValue)<<maxCheckableLenOfHistory
-		if sequencesAlreadyChecked[seq] {
-			resultsAlreadyAdded[j] = false
-			continue
-		}
-		sequencesAlreadyChecked[seq] = true
-
-		current = append(current, r)
 		if check(
 			r.seenWrittenValue,
 			resultsAlreadyAdded,
 			sequencesAlreadyChecked,
 			results,
-			i,
+			j,
 			cur|(1<<j),
 		) {
 			return true
 		}
-		current = current[:len(current)-1]
 		delete(resultsAlreadyAdded, j)
 	}
 
