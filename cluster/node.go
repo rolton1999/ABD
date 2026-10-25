@@ -27,7 +27,7 @@ type node interface {
 	addReplicas(...node)
 }
 
-func newNode(index int) node {
+func newNode(index uint64) node {
 	return &nodeImpl{
 		index:              index,
 		others:             nil,
@@ -40,7 +40,7 @@ func newNode(index int) node {
 func NewCluster(n int) []Coordinator {
 	nodes := make([]node, 0, n)
 	for i := range n {
-		nodes = append(nodes, newNode(i))
+		nodes = append(nodes, newNode(uint64(i)))
 	}
 	for i := range n {
 		nodes[i].addReplicas(nodes...)
@@ -55,7 +55,7 @@ func NewCluster(n int) []Coordinator {
 }
 
 type nodeImpl struct {
-	index  int
+	index  uint64
 	others []node
 
 	timestampTieBraker atomic.Uint64
@@ -108,7 +108,7 @@ func (n *nodeImpl) ABDWrite(ctx context.Context, value int) error {
 
 		// 30 producers, 30 consumers, 10kk vals: producers done in 58.474119084s
 		// 2 procuders, 2 consumers, 10 vals: producers done in 162.167µs
-		timestamp.Inc(n.timestampTieBraker.Add(1))
+		timestamp.Inc(n.timestampTieBraker.Add(1), n.index)
 
 		// to capture the new incremented timestamp value
 		var writes []func(context.Context) bool
